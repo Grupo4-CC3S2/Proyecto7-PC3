@@ -1,0 +1,15 @@
+__pycache__/
+.Python
+venv/
+env/
+.venv
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.env
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
