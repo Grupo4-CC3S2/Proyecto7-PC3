@@ -1,5 +1,6 @@
 __pycache__/
 .Python
+.mypy_cache/
 venv/
 env/
 .venv
@@ -13,3 +14,4 @@ htmlcov/
 *.tfstate.*
 *.tfvars
 .terraform.lock.hcl
+.terraform/
