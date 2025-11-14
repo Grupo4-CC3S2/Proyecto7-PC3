@@ -21,6 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuración de RabbitMQ desde variables de entorno
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", 6))
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", 5671))
 RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "tasks_queue")
@@ -113,7 +114,7 @@ class RabbitMQClient:
                 ),
             )
 
-            # Espera hasta 5s a que llegue la respuesta
+            # Espera hasta 11s a que llegue la respuesta
             self.connection.process_data_events(time_limit=11)
 
             if not self.response:
@@ -130,7 +131,7 @@ class RabbitMQClient:
 
         try:
             # Reintenta solo si send_message lanza excepción (timeout o error lógico)
-            result = retry_with_backoff(send_message, max_retries=5, base_delay=1)
+            result = retry_with_backoff(send_message, max_retries=MAX_RETRIES, base_delay=1)
 
             logger.info(f"Worker response: {result}")
             return result
@@ -143,8 +144,8 @@ class RabbitMQClient:
 
         except RuntimeError as e:
             raise HTTPException(
-                status_code=502,
-                detail=f"Worker failed after retries: {str(e)}"
+                status_code=500,
+                detail=f"Worker failed after retries {MAX_RETRIES}: {str(e)}"
             )
 
         except json.JSONDecodeError:
