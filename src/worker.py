@@ -1,12 +1,9 @@
 import pika
 import json
-from .ports.repository import ICounterRepository
-import time
-
+from .commands.factory import CommandFactory
 
 class Worker:
-    def __init__(self, repository: ICounterRepository):
-        # El Worker recibe el Adapter por Inyección de Dependencias
+    def __init__(self, repository):
         self.repository = repository
 
         connection = pika.BlockingConnection(
@@ -16,37 +13,25 @@ class Worker:
         self.channel.queue_declare(queue="tasks_queue", durable=True)
 
     def on_message_received(self, ch, method, properties, body):
-        """Callback que se ejecuta cuando llega un mensaje."""
-        print(f"WORKER: Mensaje recibido: {body}")
+        print(f"WORKER: mensaje recibido: {body}")
 
         data = json.loads(body)
         action = data.get("action")
-        increment = data.get("increment", 1)
-        delay = data.get("delay", 1)  # segundos entre pasos
 
-        if action == "INCREMENT_COUNTER":
-            print(f"WORKER: Incrementando contador en {increment} con delay {delay}s")
+        try:
+            # Crear el command
+            command = CommandFactory.create(action, data, self.repository)
+            # Ejecutar
+            result = command.execute()
 
-            # Simula incremento por pasos (p. ej., 1 en 1)
-            for i in range(increment):
-                self.repository.incrementCounter(1)
-                time.sleep(delay)
-                print(f"WORKER: Paso {i+1}/{increment} completado")
+        except Exception as e:
+            print(f"WORKER: Error procesando el mensaje {e}")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
 
-            result = {
-                "status": "success",
-                "message": f"Incremento completado ({increment})",
-                "counter": self.repository.getCounter(),
-            }
-
-        elif action == "GET_COUNTER":
-            current = self.repository.getCounter()
-            result = {"status": "success", "counter": current}
-
-        else:
-            result = {"status": "error", "error": f"Acción desconocida: {action}"}
-
-        # Enviar respuesta si el cliente lo pidió
+        print(f"WORKER: resultado: {result}")
+        
+        # Responder si aplica
         if properties.reply_to:
             ch.basic_publish(
                 exchange="",
@@ -57,7 +42,6 @@ class Worker:
                 ),
                 body=json.dumps(result),
             )
-            print(f"WORKER: Respuesta enviada a {properties.reply_to}")
 
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
