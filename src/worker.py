@@ -1,6 +1,7 @@
 import pika
 import json
 from .commands.factory import CommandFactory
+import time
 
 class Worker:
     def __init__(self, repository):
@@ -30,7 +31,7 @@ class Worker:
             return
 
         print(f"WORKER: resultado: {result}")
-        
+
         # Responder si aplica
         if properties.reply_to:
             ch.basic_publish(
@@ -57,14 +58,17 @@ if __name__ == "__main__":
     from .adapters.redis_repository import RedisCounterRepository
 
     print("WORKER: Iniciando...")
+    while True:
+        try:
+            repository = RedisCounterRepository()
 
-    try:
-        repository = RedisCounterRepository()
+            worker = Worker(repository=repository)
 
-        worker = Worker(repository=repository)
+            worker.start_consuming()
 
-        worker.start_consuming()
-
-    except Exception as e:
-        print(f"WORKER: Error de conexión")
-        print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+            print(f"WORKER: Error de conexión")
+            print("WORKER: Reintentando en 5 segundos...")
+            time.sleep(5)
+            
