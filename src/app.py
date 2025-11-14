@@ -115,7 +115,8 @@ class RabbitMQClient:
             )
 
             # Espera hasta 11s a que llegue la respuesta
-            self.connection.process_data_events(time_limit=11)
+            max_timeout = 2**(MAX_RETRIES-1) + 1 ## tiempo máximo de espera segun MAX_RETRIES
+            self.connection.process_data_events(time_limit= max_timeout)
 
             if not self.response:
                 raise TimeoutError("No response received")
