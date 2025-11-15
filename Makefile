@@ -3,7 +3,7 @@ VENV_DIR = .venv
 PIP = $(VENV_DIR)/Scripts/pip
 PYTEST = $(VENV_DIR)/Scripts/pytest
 
-.PHONY: all install test lint clean up down plan run-app run-worker lint-iac help
+.PHONY: all install test lint clean up down plan run-app run-worker lint-iac help metrics
 
 all: help
 
@@ -68,3 +68,9 @@ help:
 	@echo "  make run-worker Ejecuta el Worker"
 	@echo "  make clean      Limpia los archivos .pyc"
 	@echo "  make down       Destruye la infraestructura de Docker (Terraform)"
+	@echo "  metrics		 Recopila métricas de la aplicación"
+
+metrics:
+	@echo "Recopilando métricas de la aplicación"
+	@chmod +x ./metrics/collect_metrics.sh
+	@./metrics/collect_metrics.sh
