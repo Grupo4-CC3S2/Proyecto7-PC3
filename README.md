@@ -88,3 +88,19 @@ El enfoque fue construir un sistema funcional de procesamiento de tareas basado 
     make test
     ```
     
+### sprint 2
+
+El objetivo del Sprint 2 fue cumplir con la segunda fase del proyecto: "Inyección de caos".
+Se implementaron mecanismos para simular fallos en el Worker y la App, evaluando la resiliencia del sistema bajo condiciones adversas.
+Se añadieron las siguientes funcionalidades:
+
+1. **Inyección de Caos en el Worker**:
+    - Se implementó una `ChaosMixin` que introduce fallos aleatorios en el procesamiento de mensajes del Worker en base a una tasa de fallo configurable mediante la variable de entorno `CHAOS_RATE`.
+    - El Worker ahora puede simular excepciones durante la ejecución de comandos, permitiendo probar la capacidad de recuperación del sistema.
+2. **Backoff en la App**:
+    - Se mejoró la lógica de reintentos en la App para manejar los fallos inducidos por el Worker.
+    - La App ahora puede reintentar solicitudes fallidas al Worker, utilizando un backoff exponencial para evitar sobrecargar el sistema.
+3. **Dead Letter Queue (DLQ)**:
+    - Se implementó una DLQ en RabbitMQ para manejar mensajes que no pudieron ser procesados después de varios intentos.
+    - Los mensajes fallidos se redirigen a la DLQ, permitiendo su análisis posterior y evitando la pérdida de datos.
+    - Se puede consular la cantidad de mensajes en la DLQ mediante el endpoint `/api/dlq/stats`.
