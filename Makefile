@@ -3,7 +3,7 @@ VENV_DIR = .venv
 PIP = $(VENV_DIR)/Scripts/pip
 PYTEST = $(VENV_DIR)/Scripts/pytest
 
-.PHONY: all install test lint clean up down run-app run-worker help
+.PHONY: all install test lint clean up down plan run-app run-worker lint-iac help
 
 all: help
 
@@ -13,7 +13,7 @@ install: requirements.txt
 
 test:
 	@echo "Ejecutando pruebas unitarias"
-	$(PYTHON) -m pytest -v
+	$(PYTHON) -m pytest -v --cov=src --cov-fail-under=85
 
 lint:
 	@echo "Lanzando formateador (black)"
@@ -25,9 +25,18 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 
+build:
+	@echo "Construyendo imágenes de Docker"
+	docker build -t chaos-app:latest -f Dockerfile.app .
+	docker build -t chaos-worker:latest -f Dockerfile.worker .
+
 up:
 	@echo "Levantando infraestructura (RabbitMQ, Redis)..."
 	cd infra/terraform && terraform apply --auto-approve
+
+plan:
+	@echo "Verificando estado de IaC"
+	cd infra/terraform && terraform plan
 
 run-app:
 	@echo "Iniciando la app API"
@@ -37,13 +46,25 @@ run-worker:
 	@echo "Iniciando el Worker"
 	$(PYTHON) -m src.worker
 
+down:
+	@echo "Destruyendo infraestructura"
+	cd infra/terraform && terraform destroy --auto-approve
+
+lint-iac:
+	@echo "Validando IaC (fmt, validate, tflint, tfsec)"
+	cd infra/terraform && \
+		terraform fmt --check && \
+		terraform validate && \
+		tflint --force
+
 help:
 	@echo "Comandos disponibles:"
 	@echo "  make install    Instala las dependencias de requirements.txt"
 	@echo "  make test       Ejecuta todas las pruebas con pytest"
 	@echo "  make lint       Formatea el código con 'black'"
 	@echo "  make up         Levanta la infraestructura de Docker (Terraform)"
-	@echo "  make down       Destruye la infraestructura de Docker (Terraform)"
+	@echo "  make plan       Verifica el estado de la infraestructura (Terraform)"
 	@echo "  make run-app    Ejecuta la API"
 	@echo "  make run-worker Ejecuta el Worker"
 	@echo "  make clean      Limpia los archivos .pyc"
+	@echo "  make down       Destruye la infraestructura de Docker (Terraform)"

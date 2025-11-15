@@ -2,15 +2,23 @@ import pika
 import json
 from .commands.factory import CommandFactory
 import time
+import os
 
 class Worker:
     def __init__(self, repository,queue="tasks_queue",dlq="tasks_queue_dlq"):
         self.repository = repository
         self.queue = queue
         self.dlq = dlq
+
+        host = os.getenv('RABBITMQ_HOST', 'localhost')
+        port = int(os.getenv('RABBITMQ_PORT', 5671))
+
+        print(f"WORKER: Conectando a RabbitMQ en {host}:{port}")
+
         connection = pika.BlockingConnection(
-            pika.ConnectionParameters("localhost", port=5671)
+            pika.ConnectionParameters(host, port=port)
         )
+
         self.channel = connection.channel()
         self.channel.queue_declare(
             queue=self.dlq,
@@ -46,7 +54,7 @@ class Worker:
 
         except Exception as e:
             print(f"WORKER: Error procesando el mensaje {e}")
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
         print(f"WORKER: resultado: {result}")
