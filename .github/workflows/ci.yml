@@ -37,9 +37,6 @@ jobs:
       - name: Instalar TFLint
         uses: terraform-linters/setup-tflint@v4
 
-      - name: Instalar TFSec
-        uses: aquasecurity/tfsec-action@v1.0.3
-
       - name: Inicializar Terraform (para validate)
         run: terraform init
 
@@ -50,3 +47,8 @@ jobs:
 
       - name: Ejecutar Validación de IaC (Terraform)
         run: make lint-iac
+      
+      - name: Ejecutar TFSec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ./infra/terraform

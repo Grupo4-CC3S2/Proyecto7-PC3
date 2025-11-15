@@ -55,8 +55,7 @@ lint-iac:
 	cd infra/terraform && \
 		terraform fmt --check && \
 		terraform validate && \
-		tflint --force && \
-		tfsec .
+		tflint --force
 
 help:
 	@echo "Comandos disponibles:"
