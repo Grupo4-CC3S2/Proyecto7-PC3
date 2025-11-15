@@ -102,5 +102,5 @@ TASAS FINALES:
 
 1. **Linealidad del Error Rate**: El error rate es aproximadamente proporcional al CHAOS_RATE, pero el retry con backoff reduce significativamente los errores finales
 
-3. **Eficiencia Inversa**: A menor CHAOS_RATE, mayor eficiencia del retry (80% vs 2.5% de recuperación)
+3. **Eficiencia Inversa**: A menor CHAOS_RATE, mayor eficiencia del retry
 
