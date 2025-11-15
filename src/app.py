@@ -1,5 +1,5 @@
 """
-FastAPI service for counter operations with RabbitMQ
+FastAPI service for counter operations with RabbitMQ + DLQ
 Endpoints:
   GET  /api/counter/     - Get current counter value
   POST /api/counter/{n}  - Increment counter by n (default 1)
@@ -25,6 +25,7 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", 6))
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", 5671))
 RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "tasks_queue")
+RABBITMQ_DLQ = os.getenv("RABBITMQ_DLQ", "tasks_queue_dlq")
 RABBITMQ_USER = os.getenv("RABBITMQ_USER", "guest")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
 API_VERSION = os.getenv("API_VERSION", "1.0.0")
@@ -41,12 +42,13 @@ class CounterResponse(BaseModel):
 
 
 class RabbitMQClient:
-    """Cliente RabbitMQ con patrón Request-Reply"""
+    """Cliente RabbitMQ con patrón Request-Reply y DLQ"""
 
     def __init__(self):
         self.host = RABBITMQ_HOST
         self.port = RABBITMQ_PORT
         self.queue = RABBITMQ_QUEUE
+        self.dlq = RABBITMQ_DLQ
         self.user = RABBITMQ_USER
         self.password = RABBITMQ_PASSWORD
         self.connection = None
@@ -56,7 +58,7 @@ class RabbitMQClient:
         self.corr_id = None
 
     def connect(self):
-        """Establece conexión con RabbitMQ"""
+        """Establece conexión con RabbitMQ y declara colas con DLQ"""
         try:
             credentials = pika.PlainCredentials(self.user, self.password)
             self.connection = pika.BlockingConnection(
@@ -66,10 +68,29 @@ class RabbitMQClient:
             )
             self.channel = self.connection.channel()
 
-            # Declarar la cola principal de tareas (compartida)
-            self.channel.queue_declare(queue=self.queue, durable=True)
+            # Declarar la Dead Letter Queue (sin DLX para evitar loops)
+            self.channel.queue_declare(
+                queue=self.dlq,
+                durable=True,
+                arguments={
+                    'x-queue-type': 'quorum'
+                }
+            )
+            logger.info(f"Dead Letter Queue '{self.dlq}' declared")
 
-            # Crear una cola temporal (anónima) solo para respuestas
+            # Declarar la cola principal con DLX apuntando a DLQ
+            self.channel.queue_declare(
+                queue=self.queue,
+                durable=True,
+                arguments={
+                    'x-dead-letter-exchange': '',  # Default exchange
+                    'x-dead-letter-routing-key': self.dlq,
+                    'x-queue-type': 'quorum'
+                }
+            )
+            logger.info(f"Main queue '{self.queue}' declared with DLQ support")
+
+            # Crear cola temporal para respuestas
             result = self.channel.queue_declare(queue="", exclusive=True)
             self.callback_queue = result.method.queue
 
@@ -91,9 +112,48 @@ class RabbitMQClient:
         if self.corr_id == props.correlation_id:
             self.response = body
 
+    def send_to_dlq(self, message, reason, correlation_id):
+        """
+        Envía un mensaje directamente a la DLQ con metadata de error
+        """
+        try:
+            if not self.connection or self.connection.is_closed:
+                self.connect()
+
+            # Agregar metadata de error
+            dlq_message = {
+                'original_message': message,
+                'error_reason': reason,
+                'correlation_id': correlation_id,
+                'failed_at': str(uuid.uuid1().time),
+                'max_retries_reached': True
+            }
+
+            self.channel.basic_publish(
+                exchange='',
+                routing_key=self.dlq,
+                body=json.dumps(dlq_message),
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # Persistent
+                    content_type='application/json',
+                    headers={
+                        'x-original-queue': self.queue,
+                        'x-error-reason': reason,
+                        'x-correlation-id': correlation_id
+                    }
+                )
+            )
+            logger.warning(
+                f"[DLQ] Message sent to DLQ: {correlation_id} | Reason: {reason}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to send message to DLQ: {e}")
+
     def call(self, message):
         """
-        Envía un mensaje a RabbitMQ y espera una respuesta, con reintentos
+        Envía un mensaje a RabbitMQ y espera una respuesta
+        Si falla después de todos los reintentos, lo envía a DLQ
         """
 
         def send_message():
@@ -103,6 +163,12 @@ class RabbitMQClient:
             self.corr_id = str(uuid.uuid4())
             self.response = None
 
+            # Agregar contador de reintentos al mensaje
+            if 'retry_count' not in message:
+                message['retry_count'] = 0
+            
+            message['retry_count'] += 1
+
             self.channel.basic_publish(
                 exchange="",
                 routing_key=self.queue,
@@ -111,6 +177,7 @@ class RabbitMQClient:
                     reply_to=self.callback_queue,
                     correlation_id=self.corr_id,
                     content_type="application/json",
+                    delivery_mode=2,  # Persistent
                 ),
             )
 
@@ -137,31 +204,55 @@ class RabbitMQClient:
             logger.info(f"Worker response: {result}")
             return result
 
-        except TimeoutError:
-            raise HTTPException(
-                status_code=504,
-                detail="Worker timeout - no response received"
+        except (TimeoutError, RuntimeError) as e:
+            error_reason = str(e)
+            
+            # Enviar a DLQ después de agotar reintentos
+            self.send_to_dlq(
+                message=message,
+                reason=error_reason,
+                correlation_id=self.corr_id
             )
-
-        except RuntimeError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Worker failed after retries {MAX_RETRIES}: {str(e)}"
-            )
+            
+            # Determinar tipo de error
+            if isinstance(e, TimeoutError):
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Worker timeout after {MAX_RETRIES} retries. Message sent to DLQ."
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Worker failed after {MAX_RETRIES} retries. Message sent to DLQ: {error_reason}"
+                )
 
         except json.JSONDecodeError:
+            # También enviar a DLQ si la respuesta es inválida
+            self.send_to_dlq(
+                message=message,
+                reason="Invalid JSON response from worker",
+                correlation_id=self.corr_id
+            )
+            
             raise HTTPException(
                 status_code=500,
-                detail="Invalid JSON response from worker"
+                detail="Invalid JSON response from worker. Message sent to DLQ."
             )
 
         except Exception as e:
             logger.error(f"Unexpected error in call(): {e}")
+            
+            # Enviar a DLQ por errores inesperados
+            self.send_to_dlq(
+                message=message,
+                reason=f"Unexpected error: {str(e)}",
+                correlation_id=self.corr_id
+            )
+            
             raise HTTPException(
                 status_code=500,
-                detail=f"Internal error: {str(e)}"
+                detail=f"Internal error. Message sent to DLQ: {str(e)}"
             )
-
 
     def close(self):
         """Cierra conexión"""
@@ -196,6 +287,41 @@ async def shutdown_event():
 async def root():
     """Health check endpoint"""
     return {"service": "Counter API", "status": "running", "version": "1.0.0"}
+
+
+@app.get("/api/dlq/stats")
+async def get_dlq_stats():
+    """
+    Get Dead Letter Queue statistics
+    
+    Returns number of messages in DLQ
+    """
+    try:
+        if not rabbitmq_client.connection or rabbitmq_client.connection.is_closed:
+            rabbitmq_client.connect()
+        
+        # Obtener info de la DLQ sin modificarla
+        queue_info = rabbitmq_client.channel.queue_declare(
+            queue=rabbitmq_client.dlq,
+            durable=True,
+            passive=True  # Solo obtener info, no crear
+        )
+        
+        message_count = queue_info.method.message_count
+        
+        return {
+            "dlq_name": rabbitmq_client.dlq,
+            "message_count": message_count,
+            "status": "warning" if message_count > 0 else "ok",
+            "timestamp": str(uuid.uuid1().time)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting DLQ stats: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get DLQ stats: {str(e)}"
+        )
 
 
 @app.get("/api/counter/", response_model=CounterResponse)

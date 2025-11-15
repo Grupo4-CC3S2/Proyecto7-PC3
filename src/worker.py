@@ -4,14 +4,33 @@ from .commands.factory import CommandFactory
 import time
 
 class Worker:
-    def __init__(self, repository):
+    def __init__(self, repository,queue="tasks_queue",dlq="tasks_queue_dlq"):
         self.repository = repository
-
+        self.queue = queue
+        self.dlq = dlq
         connection = pika.BlockingConnection(
             pika.ConnectionParameters("localhost", port=5671)
         )
         self.channel = connection.channel()
-        self.channel.queue_declare(queue="tasks_queue", durable=True)
+        self.channel.queue_declare(
+            queue=self.dlq,
+            durable=True,
+            arguments={
+                'x-queue-type': 'quorum'
+            }
+        )
+        print(f"WORKER: Dead Letter Queue '{self.dlq}' declared")
+
+        # Declarar la cola principal con DLX apuntando a DLQ
+        self.channel.queue_declare(
+            queue=self.queue,
+            durable=True,
+            arguments={
+                'x-dead-letter-exchange': '',  # Default exchange
+                'x-dead-letter-routing-key': self.dlq,
+                'x-queue-type': 'quorum'
+            }
+        )
 
     def on_message_received(self, ch, method, properties, body):
         print(f"WORKER: mensaje recibido: {body}")
