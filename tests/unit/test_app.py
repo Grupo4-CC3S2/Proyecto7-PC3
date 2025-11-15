@@ -6,7 +6,6 @@ import pika
 
 # Fixture de preparación
 
-
 @pytest.fixture
 def mocked_client(mocker):
     """
