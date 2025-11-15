@@ -88,7 +88,7 @@ El enfoque fue construir un sistema funcional de procesamiento de tareas basado 
     make test
     ```
     
-### sprint 2
+### Sprint 2 - Fernando Mora
 
 El objetivo del Sprint 2 fue cumplir con la segunda fase del proyecto: "Inyección de caos".
 Se implementaron mecanismos para simular fallos en el Worker y la App, evaluando la resiliencia del sistema bajo condiciones adversas.
@@ -104,3 +104,62 @@ Se añadieron las siguientes funcionalidades:
     - Se implementó una DLQ en RabbitMQ para manejar mensajes que no pudieron ser procesados después de varios intentos.
     - Los mensajes fallidos se redirigen a la DLQ, permitiendo su análisis posterior y evitando la pérdida de datos.
     - Se puede consular la cantidad de mensajes en la DLQ mediante el endpoint `/api/dlq/stats`.
+
+## Sprint 2 - Jesus Osorio
+
+Me encargué de construir, automatizar y validar la plataforma de infraestructura y el pipeline de calidad para que estas pruebas de caos fueran posibles y medibles.
+
+- Hice que Terraform despliegue todo el stack.
+
+    - Dockerización: Creé `Dockerfile.app` y `Dockerfile.worker` para empaquetar las aplicaciones de Python.
+    - Modifiqué `main.tf` para crear una docker_network. Los 4 contenedores (app, worker, broker, db) se despliegan en esta red y se comunican usando sus nombres de contenedor (chaos-broker, chaos-db).
+    - El `main.tf` ahora pasa estos nombres de host como variables de entorno (env = [...]) a los contenedores.
+    - Modifiqué `worker.py` y `redis_repository.py` para leer estas variables de entorno (os.getenv).
+
+- Para asegurar la calidad, implementé las puertas de validación.
+
+    - Cobertura de Pruebas (>85%):
+
+        - Añadí tests unitarios para cubrir todos los casos de error que faltaban en `app.py`, `worker.py` y los módulos de commands.
+        - Esto incluyó probar la lógica de compensación, el rechazo de mensajes para la DLQ y todos los try...except de la API.
+        - Modifiqué `make test` para fallar si la cobertura es < 85%. Alcanzamos un 86%.
+
+    - Validación de IaC:
+
+        - Creé el target `make lint-iac` en el Makefile, que agrupa `terraform fmt --check`, `validate` y `tflint`.
+
+    - Pipeline de CI Completo:
+
+        - Actualicé `.github/workflows/ci.yml` para instalar Terraform.
+        - El pipeline ahora ejecuta `make test` y `make lint-iac`, además de un step separado para `tfsec`.
+
+### Ejemplo de uso
+
+1. Construimos las imágenes
+
+```bash
+make build
+```
+
+2. Desplegar el sistema completo
+
+```bash
+make up
+```
+
+3. Prueba de camino feliz (API) 
+
+```bash
+curl http://localhost:8000/api/counter/
+```
+
+4. Probamos la lógica de rechazo que fusionamos en `worker.py`.
+
+    - Abrir la UI: Vamos a `http://localhost:15673` (UI de RabbitMQ).
+    - Verificamos Colas: Ve a "Queues" y confirma que tasks_queue y tasks_queue_dlq existen.
+    - Inyectar Mensaje Erróneo:
+        - Hacemos clic en tasks_queue.
+        - Vamos a "Publish message".
+        - Publicamos un mensaje con una acción que no existe: `{"action": "ACCION_INVALIDA"}`.
+
+    - Vemos el Resultado: Refrescamos la página. El mensaje desaparece de `tasks_queue` y aparece 1 mensaje nuevo en `tasks_queue_dlq`. ¡El mensaje fallido fue capturado!
