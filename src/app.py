@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuración de RabbitMQ desde variables de entorno
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", 6))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", 4))
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", 5671))
 RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "tasks_queue")
