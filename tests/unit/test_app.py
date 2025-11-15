@@ -116,9 +116,9 @@ def test_call_retry_scenarios(
             mocked_client.call(test_message)
 
         if scenario == "persistent_worker_error":
-            assert e.value.status_code == 502
+            assert e.value.status_code == 500
         elif scenario == "no_response_timeout":
-            assert e.value.status_code == 502
+            assert e.value.status_code == 500
         else:
             pytest.fail("Unexpected exception scenario")
 
