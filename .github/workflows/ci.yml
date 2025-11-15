@@ -1,4 +1,4 @@
-name: CI Pruebas Python
+name: CI Pruebas Python, Cobertura y Terraform
 
 # Se ejecuta en cada 'push' y en cada 'pull_request' (PR) a la rama 'main' o 'develop'
 on:
@@ -31,7 +31,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Ejecutar los tests
-      - name: Ejecutar Pytest
-        run: |
-          python -m pytest -v
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Instalar TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Instalar TFSec
+        uses: aquasecurity/tfsec-action@v1.0.3
+
+      - name: Inicializar Terraform (para validate)
+        run: terraform init
+
+        working-directory: ./infra/terraform
+
+      - name: Ejecutar Pruebas y Cobertura
+        run: make test
+
+      - name: Ejecutar Validación de IaC (Terraform)
+        run: make lint-iac
