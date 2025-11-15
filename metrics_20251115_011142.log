@@ -1,0 +1,17 @@
+=========================================
+  REPORTE FINAL
+=========================================
+Duración de la prueba: Sat Nov 15 01:29:12 AM -05 2025
+
+ CONTADORES FINALES:
+ Total de consultas:     106
+ Respuestas con error:   42
+ Mensajes en DLQ:        42
+ Total de retries:       216
+
+ TASAS FINALES:
+  • Error rate:             39.00%
+  • Tasa captura DLQ:       39.00%
+  • Retries promedio:       3.07
+
+=========================================

@@ -163,3 +163,48 @@ curl http://localhost:8000/api/counter/
         - Publicamos un mensaje con una acción que no existe: `{"action": "ACCION_INVALIDA"}`.
 
     - Vemos el Resultado: Refrescamos la página. El mensaje desaparece de `tasks_queue` y aparece 1 mensaje nuevo en `tasks_queue_dlq`. ¡El mensaje fallido fue capturado!
+
+## Sprint 3 - Mora
+
+# 1. Script de Métricas: `collect_metrics.sh`
+
+Este script permite ejecutar una sesión de medición continua sobre la API Counter, recolectando estadísticas clave y generando un reporte final al finalizar la prueba.
+
+## Funcionalidades principales
+
+### Recolección continua de métricas
+- Número total de consultas enviadas.
+- Cantidad de respuestas con error (4xx/5xx).
+- Retries detectados explícitamente en las respuestas.
+- Retries estimados según el tiempo de ejecución.
+- Mensajes capturados en la Dead Letter Queue (DLQ).
+
+### Panel interactivo en tiempo real
+En cada iteración, se muestra un tablero con:
+- Contadores acumulados.
+- Tasas de error.
+- Tasa de captura en DLQ.
+- Retries totales y promedio.
+- Estado inicial y actual de la DLQ.
+
+### Registro completo en archivos
+Cada ejecución genera un archivo con nombre:
+
+```
+metrics_YYYYMMDD_HHMMSS.log
+```
+
+# 2. Integración con Makefile
+
+Se añadió el target:
+
+```
+make metrics
+```
+
+Este comando ejecuta el recolector con los parámetros por defecto y simplifica las pruebas manuales o automatizadas del sistema durante escenarios de caos.
+
+Se creó un archivo en `docs/metrics.md` con los resultados obtenidos al ejecutar pruebas bajo distintos niveles de fallo controlado:
+
+- CHAOS_RATE = 0.1
+- CHAOS_RATE = 0.4
