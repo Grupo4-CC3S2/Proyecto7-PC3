@@ -1,52 +1,65 @@
 import pika
 import json
-from .ports.repository import ICounterRepository
+from .commands.factory import CommandFactory
 import time
-
+import os
 
 class Worker:
-    def __init__(self, repository: ICounterRepository):
-        # El Worker recibe el Adapter por Inyección de Dependencias
+    def __init__(self, repository,queue="tasks_queue",dlq="tasks_queue_dlq"):
         self.repository = repository
+        self.queue = queue
+        self.dlq = dlq
+
+        host = os.getenv('RABBITMQ_HOST', 'localhost')
+        port = int(os.getenv('RABBITMQ_PORT', 5671))
+
+        print(f"WORKER: Conectando a RabbitMQ en {host}:{port}")
 
         connection = pika.BlockingConnection(
-            pika.ConnectionParameters("localhost", port=5671)
+            pika.ConnectionParameters(host, port=port)
         )
+
         self.channel = connection.channel()
-        self.channel.queue_declare(queue="tasks_queue", durable=True)
+        self.channel.queue_declare(
+            queue=self.dlq,
+            durable=True,
+            arguments={
+                'x-queue-type': 'quorum'
+            }
+        )
+        print(f"WORKER: Dead Letter Queue '{self.dlq}' declared")
+
+        # Declarar la cola principal con DLX apuntando a DLQ
+        self.channel.queue_declare(
+            queue=self.queue,
+            durable=True,
+            arguments={
+                'x-dead-letter-exchange': '',  # Default exchange
+                'x-dead-letter-routing-key': self.dlq,
+                'x-queue-type': 'quorum'
+            }
+        )
 
     def on_message_received(self, ch, method, properties, body):
-        """Callback que se ejecuta cuando llega un mensaje."""
-        print(f"WORKER: Mensaje recibido: {body}")
+        print(f"WORKER: mensaje recibido: {body}")
 
         data = json.loads(body)
         action = data.get("action")
-        increment = data.get("increment", 1)
-        delay = data.get("delay", 1)  # segundos entre pasos
 
-        if action == "INCREMENT_COUNTER":
-            print(f"WORKER: Incrementando contador en {increment} con delay {delay}s")
+        try:
+            # Crear el command
+            command = CommandFactory.create(action, data, self.repository)
+            # Ejecutar
+            result = command.execute()
 
-            # Simula incremento por pasos (p. ej., 1 en 1)
-            for i in range(increment):
-                self.repository.incrementCounter(1)
-                time.sleep(delay)
-                print(f"WORKER: Paso {i+1}/{increment} completado")
+        except Exception as e:
+            print(f"WORKER: Error procesando el mensaje {e}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return
 
-            result = {
-                "status": "success",
-                "message": f"Incremento completado ({increment})",
-                "counter": self.repository.getCounter(),
-            }
+        print(f"WORKER: resultado: {result}")
 
-        elif action == "GET_COUNTER":
-            current = self.repository.getCounter()
-            result = {"status": "success", "counter": current}
-
-        else:
-            result = {"status": "error", "error": f"Acción desconocida: {action}"}
-
-        # Enviar respuesta si el cliente lo pidió
+        # Responder si aplica
         if properties.reply_to:
             ch.basic_publish(
                 exchange="",
@@ -57,7 +70,6 @@ class Worker:
                 ),
                 body=json.dumps(result),
             )
-            print(f"WORKER: Respuesta enviada a {properties.reply_to}")
 
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -73,14 +85,17 @@ if __name__ == "__main__":
     from .adapters.redis_repository import RedisCounterRepository
 
     print("WORKER: Iniciando...")
+    while True:
+        try:
+            repository = RedisCounterRepository()
 
-    try:
-        repository = RedisCounterRepository()
+            worker = Worker(repository=repository)
 
-        worker = Worker(repository=repository)
+            worker.start_consuming()
 
-        worker.start_consuming()
-
-    except Exception as e:
-        print(f"WORKER: Error de conexión")
-        print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+            print(f"WORKER: Error de conexión")
+            print("WORKER: Reintentando en 5 segundos...")
+            time.sleep(5)
+            
